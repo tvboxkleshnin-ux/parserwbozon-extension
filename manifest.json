@@ -1,0 +1,100 @@
+{
+  "manifest_version": 3,
+  "name": "PARSERWBOZON — отслеживание цен",
+  "version": "1.8.1",
+  "description": "WB / Ozon / Я.Маркет / AliExpress / Pepper → PARSERWBOZON + сравнение с поставщиками",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "PARSERWBOZON",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["activeTab", "storage", "alarms", "cookies", "tabs"],
+  "host_permissions": [
+    "http://127.0.0.1:5000/*",
+    "http://localhost:5000/*",
+    "http://192.168.0.45:5000/*",
+    "https://*.wildberries.ru/*",
+    "https://*.wildberries.by/*",
+    "https://*.wildberries.kz/*",
+    "https://card.wb.ru/*",
+    "https://search.wb.ru/*",
+    "https://*.ozon.ru/*",
+    "https://*.ozon.by/*",
+    "https://*.ozon.kz/*",
+    "https://market.yandex.ru/*",
+    "https://*.market.yandex.ru/*",
+    "https://*.aliexpress.ru/*",
+    "https://aliexpress.ru/*",
+    "https://*.aliexpress.com/*",
+    "https://www.pepper.ru/*",
+    "https://pepper.ru/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.wildberries.ru/*",
+        "https://www.wildberries.ru/*",
+        "https://*.wildberries.by/*",
+        "https://*.wildberries.kz/*",
+        "https://*.ozon.ru/*",
+        "https://*.ozon.by/*",
+        "https://*.ozon.kz/*",
+        "https://market.yandex.ru/*",
+        "https://*.market.yandex.ru/*",
+        "https://*.aliexpress.ru/*",
+        "https://aliexpress.ru/*",
+        "https://*.aliexpress.com/*"
+      ],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*.wildberries.ru/catalog/*",
+        "https://www.wildberries.ru/catalog/*",
+        "https://*.wildberries.by/catalog/*",
+        "https://*.wildberries.kz/catalog/*",
+        "https://www.wildberries.ru/catalog/0/search.aspx*",
+        "https://*.wildberries.ru/catalog/0/search.aspx*",
+        "https://*.wildberries.ru/brands/*",
+        "https://www.wildberries.ru/brands/*",
+        "https://*.wildberries.by/brands/*",
+        "https://*.wildberries.kz/brands/*",
+        "https://*.wildberries.ru/seller/*",
+        "https://www.wildberries.ru/seller/*",
+        "https://*.wildberries.by/seller/*",
+        "https://*.wildberries.kz/seller/*"
+      ],
+      "exclude_matches": [
+        "https://*.wildberries.ru/catalog/*/detail*",
+        "https://www.wildberries.ru/catalog/*/detail*",
+        "https://*.wildberries.by/catalog/*/detail*",
+        "https://*.wildberries.kz/catalog/*/detail*"
+      ],
+      "js": ["catalog.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.pepper.ru/deals/*",
+        "https://pepper.ru/deals/*"
+      ],
+      "js": ["pepper.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

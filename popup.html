@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #1a1b1e;
+      color: #e4e4e4;
+      width: 320px;
+      padding: 14px;
+    }
+    h1 { font-size: 14px; margin: 0 0 8px; }
+    .sub { color: #888; font-size: 12px; margin-bottom: 12px; }
+    .row { display: flex; justify-content: space-between; margin: 6px 0; font-size: 13px; gap: 8px; }
+    .ok { color: #a3d9a5; }
+    .err { color: #f0a0a0; }
+    label { display: block; font-size: 12px; color: #888; margin-top: 10px; }
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 4px;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid #444;
+      background: #25262a;
+      color: #e4e4e4;
+    }
+    button {
+      width: 100%;
+      margin-top: 10px;
+      padding: 8px;
+      border: none;
+      border-radius: 8px;
+      background: #2d7d46;
+      color: #fff;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    button.secondary { background: #3d3d4a; }
+    button:hover { filter: brightness(1.08); }
+  </style>
+</head>
+<body>
+  <h1>PARSERWBOZON</h1>
+  <p class="sub">WB / Ozon / Я.Маркет / AliExpress + Pepper.ru → NAS</p>
+  <div id="status" class="err">Проверяю сервер…</div>
+  <div class="row"><span>Товаров</span><span id="count">—</span></div>
+  <div class="row"><span>Интервал NAS</span><span id="interval">—</span></div>
+  <div class="row"><span>Проверка WB</span><span id="lastCheck">—</span></div>
+  <label>Адрес сервера
+    <input id="apiBase" type="url" placeholder="http://192.168.0.45:5000">
+  </label>
+  <button id="save" class="secondary">Сохранить адрес</button>
+  <button id="checkNow">Проверить цены сейчас</button>
+  <button id="open" class="secondary">Открыть панель</button>
+  <script src="popup.js"></script>
+</body>
+</html>
