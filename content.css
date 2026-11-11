@@ -82,26 +82,25 @@
   color: #c9b87a;
 }
 
-/* Бейдж в списке предложений AE (у строки доставки) */
+/* Бейдж типа доставки в списке «все предложения» AE */
 .pwbo-ae-offer-badge {
   display: block;
   margin: 6px 0 8px;
   padding: 6px 8px;
   border-radius: 8px;
   font-family: system-ui, -apple-system, Segoe UI, sans-serif;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.35;
   color: #1a3a5c;
   background: #e8f2fc;
   border: 1px solid #b7d3ef;
-  max-width: 520px;
+  max-width: 420px;
   box-sizing: border-box;
 }
 
 .pwbo-ae-offer-badge .pwbo-ae-offer-h {
-  font-weight: 600;
+  font-weight: 700;
   margin-bottom: 2px;
-  color: #0b5cab;
 }
 
 .pwbo-ae-offer-badge.muted {
@@ -110,22 +109,26 @@
   border-color: #ddd;
 }
 
-.pwbo-ae-offer-badge.cheaper {
+.pwbo-ae-offer-badge.mail {
   color: #14532d;
   background: #e8f8ec;
-  border-color: #a7d4b2;
+  border-color: #7dca92;
 }
 
-.pwbo-ae-offer-badge.expensive {
-  color: #7f1d1d;
-  background: #fdecec;
-  border-color: #e2b4b4;
+.pwbo-ae-offer-badge.wb {
+  color: #6b21a8;
+  background: #f5e9ff;
+  border-color: #d4b4f0;
 }
 
-.pwbo-ae-offer-badge.ok {
-  color: #6b4f1d;
-  background: #fff7e6;
-  border-color: #e6d3a3;
+.pwbo-ae-card-mail {
+  outline: 2px solid #22c55e !important;
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
+.pwbo-ae-card-wb {
+  opacity: 0.72;
 }
 
 #pwbo-panel .pwbo-target-row {

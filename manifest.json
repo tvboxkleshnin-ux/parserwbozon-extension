@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "PARSERWBOZON — отслеживание цен",
-  "version": "1.9.1",
-  "description": "WB / Ozon / Я.Маркет / AliExpress / Pepper → PARSERWBOZON + сравнение с поставщиками (в т.ч. список офферов)",
+  "version": "1.9.2",
+  "description": "WB / Ozon / Я.Маркет / AliExpress / Pepper → PARSERWBOZON; AE список офферов: почта vs пункт ВБ",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
