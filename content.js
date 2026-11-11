@@ -1169,9 +1169,278 @@
   let lastMayakKey = "";
   let lastAeOfferKey = "";
   let navTimer = null;
+  const aeSupplierCache = new Map(); // key -> promise/result
+  let aeListScanBusy = false;
 
   function onProductPage() {
     return isWbProduct() || isOzonProduct() || isYandexProduct() || isAliExpressProduct();
+  }
+
+  function isAliExpressHost() {
+    return /aliexpress\.(ru|com)$/i.test(location.hostname);
+  }
+
+  async function cachedSupplierCompare(name, price, duty, shipsFromRu) {
+    const key = `${name}|${price || 0}|${duty || 0}|${shipsFromRu ? 1 : 0}`;
+    if (aeSupplierCache.has(key)) return aeSupplierCache.get(key);
+    const p = api("/api/supplier_compare", {
+      method: "POST",
+      body: {
+        name,
+        price: price || null,
+        duty: duty || 0,
+        ships_from_ru: !!shipsFromRu,
+      },
+    }).catch((e) => ({ ok: false, message: e.message || "err" }));
+    aeSupplierCache.set(key, p);
+    // не раздувать кэш бесконечно
+    if (aeSupplierCache.size > 80) {
+      const first = aeSupplierCache.keys().next().value;
+      aeSupplierCache.delete(first);
+    }
+    return p;
+  }
+
+  function parsePriceFromText(text) {
+    const s = String(text || "").replace(/\u00a0/g, " ");
+    // берём первое крупное число с ₽ / руб (не купон -1345)
+    const m = s.match(/(?<![-\d])(\d[\d\s]{2,10})\s*(?:₽|руб)/);
+    if (!m) return null;
+    const n = Number(String(m[1]).replace(/\s/g, ""));
+    return n > 500 && n < 1e8 ? n : null;
+  }
+
+  function findAeDeliveryAnchor(card) {
+    const nodes = [
+      ...card.querySelectorAll(
+        [
+          '[class*="delivery"]',
+          '[class*="Delivery"]',
+          '[class*="logistics"]',
+          '[class*="Logistics"]',
+          '[class*="shipping"]',
+          '[class*="Shipping"]',
+          '[class*="freight"]',
+          '[class*="Freight"]',
+          '[class*="promise"]',
+          '[class*="Promise"]',
+        ].join(",")
+      ),
+    ];
+    for (const el of nodes) {
+      const t = (el.textContent || "").replace(/\s+/g, " ");
+      if (/доставк|бесплатн|почт|январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр|\d{1,2}\s*[–—-]\s*\d{1,2}/i.test(t)) {
+        return el;
+      }
+    }
+    // fallback: строка с датами доставки в тексте карточки
+    for (const el of card.querySelectorAll("div, span, p")) {
+      if (el.querySelector(".pwbo-ae-offer-badge")) continue;
+      const t = (el.textContent || "").replace(/\s+/g, " ").trim();
+      if (t.length < 8 || t.length > 90) continue;
+      if (/^\d{1,2}\s*[–—-]\s*\d{1,2}\s+\S+.*(?:Бесплатно|доставк|₽)?/i.test(t)
+        || /(?:Бесплатно).{0,20}\d{1,2}\s*[–—-]\s*\d{1,2}/i.test(t)
+        || /доставка.{0,40}\d{1,2}/i.test(t)) {
+        return el;
+      }
+    }
+    return null;
+  }
+
+  function findAeOfferCards() {
+    const cards = new Set();
+    // якорь: кнопка «В корзину» в списке предложений
+    for (const el of document.querySelectorAll("button, a, div, span")) {
+      const label = (el.textContent || "").replace(/\s+/g, " ").trim();
+      if (!/^в корзину$/i.test(label)) continue;
+      let root = el;
+      for (let i = 0; i < 10 && root; i++) {
+        root = root.parentElement;
+        if (!root) break;
+        const t = (root.innerText || "").replace(/\u00a0/g, " ");
+        if (!/\d[\d\s]{2,}\s*(?:₽|руб)/.test(t)) continue;
+        if (!/доставк|бесплатн|ноябр|декабр|январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|\d{1,2}\s*[–—-]\s*\d{1,2}/i.test(t)) {
+          continue;
+        }
+        // карточка не на всю страницу
+        if ((root.innerText || "").length > 2500) continue;
+        cards.add(root);
+        break;
+      }
+    }
+    // альтернатива: блоки «Это предложение» / оффер-карточки
+    for (const el of document.querySelectorAll(
+      '[class*="OfferCard"], [class*="offer-card"], [class*="OfferItem"], [class*="offerItem"], [class*="PlpOffer"], [class*="groupOffer"], [class*="GroupOffer"], [class*="otherOffer"], [class*="OtherOffer"]'
+    )) {
+      const t = (el.innerText || "").replace(/\u00a0/g, " ");
+      if (/\d[\d\s]{2,}\s*(?:₽|руб)/.test(t) && /в корзину|доставк|бесплатн/i.test(t)) {
+        if (t.length <= 2500) cards.add(el);
+      }
+    }
+    return [...cards];
+  }
+
+  function extractAeOfferCardInfo(card) {
+    const text = (card.innerText || "").replace(/\u00a0/g, " ");
+    let title = "";
+    const titleEl =
+      card.querySelector("h1, h2, h3, a[href*='/item/'] [class*='title'], a[href*='/item/'], [class*='Title'], [class*='title']")
+      || null;
+    if (titleEl) {
+      title = (titleEl.getAttribute("title") || titleEl.textContent || "").replace(/\s+/g, " ").trim();
+    }
+    if (!title || title.length < 8) {
+      const m = text.match(/Смартфон[^\n]{5,120}/i) || text.match(/Poco[^\n]{3,100}/i)
+        || text.match(/Redmi[^\n]{3,100}/i) || text.match(/Xiaomi[^\n]{3,100}/i);
+      title = m ? m[0].replace(/\s+/g, " ").trim() : "";
+    }
+    title = title.slice(0, 160);
+    // цена: предпочитаем крупный price-блок, иначе первое число ₽ не из купона
+    let price = null;
+    const priceEl = card.querySelector(
+      '[class*="Price"], [class*="price"], [class*="amount"]'
+    );
+    if (priceEl) {
+      const raw = (priceEl.textContent || "").replace(/\u00a0/g, " ");
+      if (!/купон|скидк|без\s*купон/i.test(raw) || /\d[\d\s]{2,}\s*₽/.test(raw)) {
+        price = parsePriceFromText(raw);
+      }
+    }
+    if (price == null) {
+      // вырезаем строки с купоном
+      const cleaned = text
+        .split("\n")
+        .filter((line) => !/купон|без\s*купон|взять/i.test(line))
+        .join("\n");
+      price = parsePriceFromText(cleaned);
+    }
+    let duty = null;
+    const feeEl = card.querySelector('[class*="customsFee"], [class*="CustomsFee"]');
+    if (feeEl) {
+      const m = (feeEl.textContent || "").replace(/\u00a0/g, " ")
+        .match(/таможенн\w*\s*пошлин\w*\s*[≈~]?\s*(\d[\d\s]{0,10})/i);
+      if (m) duty = Number(String(m[1]).replace(/\s/g, ""));
+    }
+    if (duty == null) {
+      const m = text.match(/таможенн\w*\s*пошлин\w*\s*[≈~]?\s*(\d[\d\s]{0,10})/i);
+      if (m) duty = Number(String(m[1]).replace(/\s/g, ""));
+    }
+    const variants = parseRamRomPairs(title);
+    const base = extractAeBaseModel(title);
+    const shipsFromRu = /склад[ае]?\s+в\s+(рф|россии)|со склада в рф/i.test(text);
+    const link = card.querySelector("a[href*='/item/']");
+    let url = link?.href || "";
+    return {
+      title,
+      base,
+      variants,
+      price,
+      duty: shipsFromRu ? 0 : duty,
+      ships_from_ru: shipsFromRu,
+      url,
+    };
+  }
+
+  function ensureAeOfferBadge(card, deliveryEl) {
+    let badge = card.querySelector(".pwbo-ae-offer-badge");
+    if (badge) return badge;
+    badge = document.createElement("div");
+    badge.className = "pwbo-ae-offer-badge muted";
+    badge.textContent = "PWBO: …";
+    if (deliveryEl && deliveryEl.parentElement) {
+      deliveryEl.insertAdjacentElement("afterend", badge);
+    } else {
+      card.appendChild(badge);
+    }
+    return badge;
+  }
+
+  async function fillAeOfferBadge(badge, info) {
+    if (!info?.title || !info.price) {
+      badge.className = "pwbo-ae-offer-badge muted";
+      badge.textContent = "PWBO: нет цены/названия";
+      return;
+    }
+    const variants = info.variants?.length
+      ? info.variants
+      : [{ ram: null, rom: null, key: "?" }];
+    const duty = info.duty || 0;
+    const lines = [];
+    let kind = "";
+    // если несколько версий в названии — показываем закуп по каждой; delta только если одна версия
+    // (в списке офферов выбранный SKU обычно неизвестен)
+    const single = variants.length === 1 && variants[0].ram;
+    for (const v of variants.slice(0, 4)) {
+      const name = v.ram
+        ? `${info.base} ${v.ram}/${v.rom}`.replace(/\s+/g, " ").trim()
+        : info.title;
+      const res = await cachedSupplierCompare(
+        name,
+        single ? info.price : null,
+        single ? duty : 0,
+        info.ships_from_ru
+      );
+      if (!res?.matched || !res.best) {
+        lines.push(`${v.key || "—"}: нет у поставщиков`);
+        continue;
+      }
+      const buy = res.best.price;
+      if (single && res.best.delta != null) {
+        const aeTotal = info.price + (duty || 0);
+        const d = formatDeltaLine(res.best.delta);
+        if (d.kind) kind = d.kind;
+        const dutyBit = duty
+          ? ` · пошлина ${formatPrice(duty)} · итого ${formatPrice(aeTotal)}`
+          : " · без пошлины в списке";
+        lines.push(
+          `${v.key}: закуп ${formatPrice(buy)} (${res.best.supplier}) · ${d.text}${dutyBit}`
+        );
+      } else {
+        const aeTotal = info.price + (duty || 0);
+        const delta = buy - aeTotal;
+        const d = formatDeltaLine(delta);
+        if (variants.length === 1 && d.kind) kind = d.kind;
+        lines.push(
+          `${v.key}: закуп ${formatPrice(buy)} (${res.best.supplier})` +
+            (variants.length === 1 ? ` · ${d.text}` : "")
+        );
+      }
+    }
+    badge.className = `pwbo-ae-offer-badge${kind ? ` ${kind}` : ""}`;
+    badge.innerHTML = `<div class="pwbo-ae-offer-h">PWBO vs поставщики</div>${
+      lines.map((t) => `<div>${t}</div>`).join("")
+    }`;
+  }
+
+  async function scanAeOfferList() {
+    if (!isAliExpressHost() || aeListScanBusy) return;
+    if (!isAliExpressProduct() && !/\/item\//i.test(location.pathname)) return;
+    aeListScanBusy = true;
+    try {
+      const cards = findAeOfferCards();
+      for (const card of cards) {
+        const delivery = findAeDeliveryAnchor(card);
+        if (!delivery && !(card.innerText || "").match(/в корзину/i)) continue;
+        const info = extractAeOfferCardInfo(card);
+        // пропускаем основную PDP-панель (уже есть #pwbo-panel) если карточка огромная
+        if (!info.title || !info.price) continue;
+        // на главной карточке товара список офферов — ок; сам hero можно отличить по отсутствию «В корзину» рядом с доставкой в компактной карточке
+        const badge = ensureAeOfferBadge(card, delivery);
+        const sig = `${info.title}|${info.price}|${info.duty || 0}`;
+        if (badge.dataset.pwboSig === sig) continue;
+        badge.dataset.pwboSig = sig;
+        badge.className = "pwbo-ae-offer-badge muted";
+        badge.textContent = "PWBO: считаю…";
+        try {
+          await fillAeOfferBadge(badge, info);
+        } catch (e) {
+          badge.className = "pwbo-ae-offer-badge muted";
+          badge.textContent = `PWBO: ${e.message || "ошибка"}`;
+        }
+      }
+    } finally {
+      aeListScanBusy = false;
+    }
   }
 
   function forcePanelForNewUrl() {
@@ -1230,33 +1499,38 @@
     // AliExpress: смена SKU/памяти или пошлины → пересчёт сравнения
     if (isAliExpressProduct()) {
       const product = extractProduct();
-      if (!product?.productId) return;
-      const offerKey = JSON.stringify({
-        sku: product.productId,
-        mem: product.memory_selected?.key || "",
-        price: product.price,
-        duty: product.duty || 0,
-        href: location.href,
-      });
-      if (offerKey === lastAeOfferKey) return;
-      lastAeOfferKey = offerKey;
-      const panel = document.getElementById(PANEL_ID);
-      if (!panel || panel.dataset.closed === "1") return;
-      const supplierEl = panel.querySelector(".pwbo-supplier");
-      const metaEl = panel.querySelector(".pwbo-meta");
-      if (metaEl) {
-        let metaBits = `ALIEXPRESS · ${formatPrice(product.price)}`;
-        if (product.memory_selected) metaBits += ` · ${product.memory_selected.key}`;
-        if (product.ships_from_ru) metaBits += " · 🇷🇺 склад РФ";
-        if (product.duty) metaBits += ` · пошлина ${formatPrice(product.duty)}`;
-        metaEl.textContent = metaBits;
-      }
-      if (supplierEl) {
-        renderSupplierCompare(supplierEl, null, true);
-        refreshSupplierCompare(supplierEl, product).catch(() => {
-          renderSupplierCompare(supplierEl, { ok: false, message: "Нет сравнения" }, false);
+      if (product?.productId) {
+        const offerKey = JSON.stringify({
+          sku: product.productId,
+          mem: product.memory_selected?.key || "",
+          price: product.price,
+          duty: product.duty || 0,
+          href: location.href,
         });
+        if (offerKey !== lastAeOfferKey) {
+          lastAeOfferKey = offerKey;
+          const panel = document.getElementById(PANEL_ID);
+          if (panel && panel.dataset.closed !== "1") {
+            const supplierEl = panel.querySelector(".pwbo-supplier");
+            const metaEl = panel.querySelector(".pwbo-meta");
+            if (metaEl) {
+              let metaBits = `ALIEXPRESS · ${formatPrice(product.price)}`;
+              if (product.memory_selected) metaBits += ` · ${product.memory_selected.key}`;
+              if (product.ships_from_ru) metaBits += " · 🇷🇺 склад РФ";
+              if (product.duty) metaBits += ` · пошлина ${formatPrice(product.duty)}`;
+              metaEl.textContent = metaBits;
+            }
+            if (supplierEl) {
+              renderSupplierCompare(supplierEl, null, true);
+              refreshSupplierCompare(supplierEl, product).catch(() => {
+                renderSupplierCompare(supplierEl, { ok: false, message: "Нет сравнения" }, false);
+              });
+            }
+          }
+        }
       }
+      // список «все предложения» / другие продавцы — бейджи у доставки
+      scanAeOfferList().catch(() => {});
     }
   }
 

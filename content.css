@@ -82,6 +82,52 @@
   color: #c9b87a;
 }
 
+/* Бейдж в списке предложений AE (у строки доставки) */
+.pwbo-ae-offer-badge {
+  display: block;
+  margin: 6px 0 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #1a3a5c;
+  background: #e8f2fc;
+  border: 1px solid #b7d3ef;
+  max-width: 520px;
+  box-sizing: border-box;
+}
+
+.pwbo-ae-offer-badge .pwbo-ae-offer-h {
+  font-weight: 600;
+  margin-bottom: 2px;
+  color: #0b5cab;
+}
+
+.pwbo-ae-offer-badge.muted {
+  color: #666;
+  background: #f3f3f3;
+  border-color: #ddd;
+}
+
+.pwbo-ae-offer-badge.cheaper {
+  color: #14532d;
+  background: #e8f8ec;
+  border-color: #a7d4b2;
+}
+
+.pwbo-ae-offer-badge.expensive {
+  color: #7f1d1d;
+  background: #fdecec;
+  border-color: #e2b4b4;
+}
+
+.pwbo-ae-offer-badge.ok {
+  color: #6b4f1d;
+  background: #fff7e6;
+  border-color: #e6d3a3;
+}
+
 #pwbo-panel .pwbo-target-row {
   display: none;
   gap: 6px;
