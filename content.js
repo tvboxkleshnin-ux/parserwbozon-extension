@@ -1191,17 +1191,22 @@
   }
 
   function findAeDeliveryAnchor(card) {
+    // самый точный якорь AE.ru: groupName «почтой» / строка с «пункт выдачи»
+    const group = [...card.querySelectorAll('[class*="groupName"], [class*="GroupName"]')]
+      .find((el) => /почтой|пункт/i.test(el.textContent || ""));
+    if (group) {
+      return group.closest('[class*="Delivery"], [class*="delivery"], span, div') || group;
+    }
     const nodes = [
       ...card.querySelectorAll(
         [
+          '[class*="DeliveryMethod"]',
+          '[class*="deliveryMethod"]',
+          '[class*="ProductDelivery"]',
           '[class*="delivery"]',
           '[class*="Delivery"]',
           '[class*="logistics"]',
           '[class*="Logistics"]',
-          '[class*="shipping"]',
-          '[class*="Shipping"]',
-          '[class*="freight"]',
-          '[class*="Freight"]',
           '[class*="promise"]',
           '[class*="Promise"]',
         ].join(",")
@@ -1209,20 +1214,18 @@
     ];
     for (const el of nodes) {
       const t = (el.textContent || "").replace(/\s+/g, " ");
-      if (/доставк|бесплатн|почт|январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр|\d{1,2}\s*[–—-]\s*\d{1,2}/i.test(t)) {
+      if (t.length > 200) continue;
+      if (/почтой|пункт\s*выдач|доставк|бесплатн|\d{1,2}\s*[–—-]\s*\d{1,2}/i.test(t)) {
         return el;
       }
     }
-    // fallback: строка с датами доставки в тексте карточки
+    // fallback: компактная строка с датами
     for (const el of card.querySelectorAll("div, span, p")) {
       if (el.querySelector(".pwbo-ae-offer-badge")) continue;
       const t = (el.textContent || "").replace(/\s+/g, " ").trim();
-      if (t.length < 8 || t.length > 90) continue;
-      if (/^\d{1,2}\s*[–—-]\s*\d{1,2}\s+\S+.*(?:Бесплатно|доставк|₽)?/i.test(t)
-        || /(?:Бесплатно).{0,20}\d{1,2}\s*[–—-]\s*\d{1,2}/i.test(t)
-        || /доставка.{0,40}\d{1,2}/i.test(t)) {
-        return el;
-      }
+      if (t.length < 8 || t.length > 100) continue;
+      if (/почтой|пункт\s*выдач/i.test(t)) return el;
+      if (/^\d{1,2}\s*[–—-]\s*\d{1,2}\s+\S+/i.test(t)) return el;
     }
     return null;
   }
@@ -1261,33 +1264,62 @@
   }
 
   function detectAeDeliveryType(card, deliveryEl) {
-    const chunks = [];
-    if (deliveryEl) chunks.push(deliveryEl.textContent || "");
-    // соседние строки вокруг доставки
-    if (deliveryEl?.parentElement) {
-      chunks.push(deliveryEl.parentElement.innerText || "");
+    // Важно: не сканировать всю карточку — иначе «почтой» с соседнего оффера
+    // залипает на «пункт выдачи». Смотрим только блок доставки.
+    const roots = [];
+    if (deliveryEl) {
+      roots.push(deliveryEl);
+      if (deliveryEl.parentElement) roots.push(deliveryEl.parentElement);
+      // ряд методов доставки рядом
+      const row = deliveryEl.closest(
+        '[class*="Delivery"], [class*="delivery"], [class*="Logistics"], [class*="logistics"], [class*="Promise"], [class*="promise"]'
+      );
+      if (row) roots.push(row);
     }
-    chunks.push((card.innerText || "").slice(0, 900));
-    const t = chunks.join("\n").replace(/\u00a0/g, " ").replace(/\s+/g, " ");
+    if (!roots.length) roots.push(card);
 
-    const isWb =
-      /пункт\s*(выдач|wb|вб)|пвз|wildberries|\bwb\b|\bвб\b|в\s*пункт\s*выдач|выдач\w*\s*wildberries|доставк\w*\s*в\s*пункт/i.test(t);
+    // Явный маркер AE: <span class="...groupName...">почтой</span>
+    let hasMailGroup = false;
+    for (const root of roots) {
+      for (const el of root.querySelectorAll(
+        '[class*="groupName"], [class*="GroupName"], [class*="deliveryMethod"], [class*="DeliveryMethod"]'
+      )) {
+        const gt = (el.textContent || "").replace(/\s+/g, " ").trim();
+        if (/^почтой$/i.test(gt) || /\bпочтой\b/i.test(gt)) {
+          hasMailGroup = true;
+          break;
+        }
+      }
+      if (hasMailGroup) break;
+    }
+
+    const t = roots
+      .map((el) => (el.innerText || el.textContent || "").replace(/\u00a0/g, " "))
+      .join("\n")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    // «в пункт выдачи» — это ПВЗ, НЕ почта
+    const isWb = /в\s*пункт\s*выдач|пункт\s*выдач|пвз|wildberries|\bпвз\b/i.test(t);
+    // «почтой» только как способ (не путать с «получите»)
     const isMail =
-      /почт(ой|а|ы)|почтой\s*росси|доставк\w*\s*почт|отправлен\w*\s*почт|russian\s*post|cainiao.*почт/i.test(t);
+      hasMailGroup
+      || /(^|[^\wа-яё])почтой([^\wа-яё]|$)/i.test(t)
+      || /доставк\w*\s+почт/i.test(t)
+      || /почта\s*росси/i.test(t);
 
-    if (isMail && !isWb) {
-      return { kind: "mail", label: "✉ Доставка ПОЧТОЙ", detail: "подходит" };
+    if (isMail) {
+      return {
+        kind: "mail",
+        label: "✉ Доставка ПОЧТОЙ",
+        detail: isWb ? "в строке также есть ПВЗ" : "подходит",
+      };
     }
-    if (isWb && !isMail) {
-      return { kind: "wb", label: "📦 Пункт ВБ / ПВЗ", detail: "не почта" };
+    if (isWb) {
+      return { kind: "wb", label: "📦 В пункт выдачи", detail: "не почта" };
     }
-    if (isMail && isWb) {
-      return { kind: "mail", label: "✉ Почта (+есть ПВЗ)", detail: "есть почта" };
-    }
-    // часто в списке только даты «23–27 ноября Бесплатно» без явного типа —
-    // на AE.ru у таких офферов обычно курьер/склад, не почта
-    if (/\d{1,2}\s*[–—-]\s*\d{1,2}.{0,40}бесплатн/i.test(t) || /бесплатн.{0,40}\d{1,2}\s*[–—-]\s*\d{1,2}/i.test(t)) {
-      return { kind: "unknown", label: "❓ Тип не указан", detail: "только дата/бесплатно" };
+    if (/\d{1,2}\s*[–—-]\s*\d{1,2}/i.test(t)) {
+      return { kind: "unknown", label: "❓ Только дата", detail: "слова «почтой» нет" };
     }
     return { kind: "unknown", label: "❓ Тип доставки неясен", detail: "" };
   }
