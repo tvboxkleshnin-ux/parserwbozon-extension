@@ -1263,65 +1263,69 @@
     return [...cards];
   }
 
-  function detectAeDeliveryType(card, deliveryEl) {
-    // Важно: не сканировать всю карточку — иначе «почтой» с соседнего оффера
-    // залипает на «пункт выдачи». Смотрим только блок доставки.
-    const roots = [];
+  function aeDeliveryScopeText(card, deliveryEl) {
+    // Только узкий фрагмент этой карточки — без parent списка (там чужие «почтой»).
+    const bits = [];
+    const push = (el) => {
+      if (!el || !card.contains(el)) return;
+      const t = (el.textContent || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+      if (t && t.length <= 160) bits.push(t);
+    };
     if (deliveryEl) {
-      roots.push(deliveryEl);
-      if (deliveryEl.parentElement) roots.push(deliveryEl.parentElement);
-      // ряд методов доставки рядом
-      const row = deliveryEl.closest(
-        '[class*="Delivery"], [class*="delivery"], [class*="Logistics"], [class*="logistics"], [class*="Promise"], [class*="promise"]'
-      );
-      if (row) roots.push(row);
-    }
-    if (!roots.length) roots.push(card);
-
-    // Явный маркер AE: <span class="...groupName...">почтой</span>
-    let hasMailGroup = false;
-    for (const root of roots) {
-      for (const el of root.querySelectorAll(
-        '[class*="groupName"], [class*="GroupName"], [class*="deliveryMethod"], [class*="DeliveryMethod"]'
-      )) {
-        const gt = (el.textContent || "").replace(/\s+/g, " ").trim();
-        if (/^почтой$/i.test(gt) || /\bпочтой\b/i.test(gt)) {
-          hasMailGroup = true;
-          break;
-        }
+      push(deliveryEl);
+      // соседние мелкие span/div на том же уровне (дата + groupName)
+      const p = deliveryEl.parentElement;
+      if (p && card.contains(p) && (p.textContent || "").length <= 200) {
+        push(p);
       }
-      if (hasMailGroup) break;
+      for (const sib of [deliveryEl.previousElementSibling, deliveryEl.nextElementSibling]) {
+        push(sib);
+      }
+    }
+    return bits.join(" | ");
+  }
+
+  function detectAeDeliveryType(card, deliveryEl) {
+    // Почта — ТОЛЬКО явное слово «почтой» в узком scope этой карточки.
+    // ПВЗ — «пункт выдачи». Иначе ничего не выдумываем.
+    let hasMail = false;
+    if (deliveryEl && card.contains(deliveryEl)) {
+      const scopeEls = [deliveryEl];
+      if (deliveryEl.parentElement && card.contains(deliveryEl.parentElement)
+        && (deliveryEl.parentElement.textContent || "").length <= 200) {
+        scopeEls.push(deliveryEl.parentElement);
+      }
+      for (const root of scopeEls) {
+        for (const el of [root, ...root.querySelectorAll("span, div")]) {
+          if (!card.contains(el)) continue;
+          const own = (el.textContent || "").replace(/\s+/g, " ").trim();
+          // groupName обычно короткое «почтой»
+          if (/^почтой$/i.test(own)) {
+            hasMail = true;
+            break;
+          }
+          // «29 ноября – 4 декабря почтой» — целиком короткая строка
+          if (own.length <= 80 && /(^|[^\wа-яё])почтой([^\wа-яё]|$)/i.test(own)
+            && !/пункт\s*выдач/i.test(own)) {
+            hasMail = true;
+            break;
+          }
+        }
+        if (hasMail) break;
+      }
     }
 
-    const t = roots
-      .map((el) => (el.innerText || el.textContent || "").replace(/\u00a0/g, " "))
-      .join("\n")
-      .replace(/\s+/g, " ")
-      .trim();
+    const t = aeDeliveryScopeText(card, deliveryEl);
+    const hasPvz = /в\s*пункт\s*выдач|пункт\s*выдач/i.test(t);
 
-    // «в пункт выдачи» — это ПВЗ, НЕ почта
-    const isWb = /в\s*пункт\s*выдач|пункт\s*выдач|пвз|wildberries|\bпвз\b/i.test(t);
-    // «почтой» только как способ (не путать с «получите»)
-    const isMail =
-      hasMailGroup
-      || /(^|[^\wа-яё])почтой([^\wа-яё]|$)/i.test(t)
-      || /доставк\w*\s+почт/i.test(t)
-      || /почта\s*росси/i.test(t);
-
-    if (isMail) {
-      return {
-        kind: "mail",
-        label: "✉ Доставка ПОЧТОЙ",
-        detail: isWb ? "в строке также есть ПВЗ" : "подходит",
-      };
+    if (hasMail) {
+      return { kind: "mail", label: "✉ Доставка ПОЧТОЙ", detail: "есть метка «почтой»" };
     }
-    if (isWb) {
+    if (hasPvz) {
       return { kind: "wb", label: "📦 В пункт выдачи", detail: "не почта" };
     }
-    if (/\d{1,2}\s*[–—-]\s*\d{1,2}/i.test(t)) {
-      return { kind: "unknown", label: "❓ Только дата", detail: "слова «почтой» нет" };
-    }
-    return { kind: "unknown", label: "❓ Тип доставки неясен", detail: "" };
+    // Нет явного типа — не угадываем
+    return { kind: "none", label: "", detail: "" };
   }
 
   function ensureAeOfferBadge(card, deliveryEl) {
@@ -1340,15 +1344,20 @@
 
   function fillAeDeliveryBadge(badge, card, deliveryEl) {
     const det = detectAeDeliveryType(card, deliveryEl);
-    const cls =
-      det.kind === "mail" ? "mail"
-        : det.kind === "wb" ? "wb"
-          : "muted";
+    card.classList.remove("pwbo-ae-card-mail", "pwbo-ae-card-wb");
+    if (det.kind === "none") {
+      // не выдумываем — бейдж прячем
+      badge.style.display = "none";
+      badge.textContent = "";
+      badge.className = "pwbo-ae-offer-badge muted";
+      return;
+    }
+    badge.style.display = "block";
+    const cls = det.kind === "mail" ? "mail" : "wb";
     badge.className = `pwbo-ae-offer-badge ${cls}`;
     badge.innerHTML = `<div class="pwbo-ae-offer-h">${det.label}</div>${
       det.detail ? `<div>${det.detail}</div>` : ""
     }`;
-    // визуально подсветить всю карточку с почтой
     card.classList.toggle("pwbo-ae-card-mail", det.kind === "mail");
     card.classList.toggle("pwbo-ae-card-wb", det.kind === "wb");
   }
